@@ -1,6 +1,9 @@
 package main
 
 import (
+	"arslanoktay/denemeler/pkg/config"
+	_ "arslanoktay/denemeler/pkg/log"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,18 +13,27 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/adaptor"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 
+
+
+
 func main() {
-	logger := createLogger()
-	zap.ReplaceGlobals(logger)
-	defer logger.Sync() 
+
+	appConfig := config.Read()
+
+
+	defer zap.L().Sync() 
 
 	zap.L().Info("app starting...")
 
 	app := fiber.New()
+
+	app.Get("/healthcheck", func(c *fiber.Ctx) error {
+		// TODO: check some dependencies
+		return c.SendString("OK")
+	})
 
 	app.Get("/metrics", adaptor.HTTPHandler(promhttp.Handler())) // monitoring
 
@@ -30,19 +42,21 @@ func main() {
 		return c.SendString("Hello World")
 	})
 
-
-
-
 	// Start server as go routine
 	go func() {
-		if err := app.Listen(":3000"); err != nil {
+		if err := app.Listen(fmt.Sprintf(":%s", appConfig.Port)); err != nil {
 			zap.L().Error("Failed to start server", zap.Error(err))
 			os.Exit(1)
 		}
 	}()
 
-	zap.L().Info("Server started on port 3000")
+	zap.L().Info("Server started on port", zap.String("port", appConfig.Port))
 
+	gracefulShutdown(app)
+
+}
+
+func gracefulShutdown(app *fiber.App) {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
@@ -56,32 +70,4 @@ func main() {
 
 
 	zap.L().Info("Server gracefully stopped.")
-
-}
-
-func createLogger() *zap.Logger {
-	encoderCfg := zap.NewProductionEncoderConfig()
-	encoderCfg.TimeKey = "timestamp"
-	encoderCfg.EncodeTime = zapcore.ISO8601TimeEncoder
-
-	config := zap.Config {
-		Level: zap.NewAtomicLevelAt(zap.InfoLevel),
-		Development: false,
-		DisableCaller: false,
-		DisableStacktrace: false,
-		Sampling: nil,
-		Encoding: "json",
-		EncoderConfig: encoderCfg,
-		OutputPaths: []string {
-			"stderr",
-		},
-		ErrorOutputPaths: []string {
-			"stderr",
-		},
-		InitialFields: map[string]interface{}{
-			"pid": os.Getegid(),
-		},
-	}
-
-	return zap.Must(config.Build())
 }
